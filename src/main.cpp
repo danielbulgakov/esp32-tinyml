@@ -118,7 +118,6 @@ void setup() {
     image_mem = unique_psmalloc(IMAGE_SIZE * sizeof(float));
 }
 
-
 void loop() {
     // Simple image load to a model
     ImageDataType* input = interpreter->input(0)->data.f;
