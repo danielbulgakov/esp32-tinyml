@@ -5,6 +5,9 @@
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
+#include "FS.h"
+#include "SD_MMC.h"
+
 #include "ml/model.h"
 #include "ml/data.h"
 
@@ -51,10 +54,36 @@ UPSRam unique_psmalloc(size_t size) {
     return smart_ptr;
 }
 
+// ========================== SDCARD ==========================================
+constexpr size_t MODEL_SIZE = 2241872; // model stored in bytes
+std::string FILE_PATH = "/model.tflite"; // model stored in bytes
+
+UPSRam import_model() {
+    log_i("Mounting MicroSD Card");
+    if (!SD_MMC.begin()) {
+        log_e("MicroSD Card Mount Failed");
+        return nullptr;
+    }
+    uint8_t cardType = SD_MMC.cardType();
+    if (cardType == CARD_NONE) {
+        log_e("No MicroSD Card found");
+        return nullptr;
+    }
+    File file = SD_MMC.open(FILE_PATH.c_str(), "rb");
+    if (!file) {
+        log_e("Failed to open file!");
+        return nullptr;
+    }
+    UPSRam res = unique_psmalloc(MODEL_SIZE);
+    size_t bytes_read = file.read(res.get(), MODEL_SIZE);
+    log_i("Read %d bytes into PSRAM\n", bytes_read);
+
+    file.close();
+}
+
 // ========================== TINYML ==========================================
 
 constexpr size_t IMAGE_SIZE = (28*28); // number of pixels per image (grayscale)
-constexpr size_t MODEL_SIZE = MNIST_model_data_len; // model stored in bytes
 
 // Some tinyml specific consts
 constexpr size_t TENSOR_SIZE = 100 * 1024; // 1024 KB for tensors
@@ -68,11 +97,11 @@ typedef float ImageDataType;
 
 void setup_tinyml_model() {
     // Allocate mem for needs
-    UPSRam model_mem  = unique_psmalloc(MODEL_SIZE);
+    UPSRam model_mem  = import_model();
     UPSRam tensor_mem = unique_psmalloc(TENSOR_SIZE);
 
     // Get the model version
-    const tflite::Model* model = tflite::GetModel(MNIST_model_data);
+    const tflite::Model* model = tflite::GetModel(model_mem.get());
     if (model->version() != TFLITE_SCHEMA_VERSION) {
         log_e("Incorrect version of TFLite model");
         return;
