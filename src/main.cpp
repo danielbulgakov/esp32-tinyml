@@ -8,8 +8,8 @@
 #include "FS.h"
 #include "SD_MMC.h"
 
-#include "ml/model.h"
-#include "ml/data.h"
+// #include "ml/model.h"
+#include "ml/input1.h"
 
 // ========================== PSRAM INIT ======================================
 
@@ -55,27 +55,26 @@ UPSRam unique_psmalloc(size_t size) {
 }
 
 // ========================== SDCARD ==========================================
-constexpr size_t MODEL_SIZE = 2241872; // model stored in bytes
+constexpr size_t MODEL_SIZE = 2293760; // model stored in bytes
 std::string FILE_PATH = "/model.tflite"; // model stored in bytes
 
-UPSRam import_model() {
+void import_model(uint8_t* ptr) {
     log_i("Mounting MicroSD Card");
     if (!SD_MMC.begin()) {
         log_e("MicroSD Card Mount Failed");
-        return nullptr;
+        return;
     }
     uint8_t cardType = SD_MMC.cardType();
     if (cardType == CARD_NONE) {
         log_e("No MicroSD Card found");
-        return nullptr;
+        return;
     }
     File file = SD_MMC.open(FILE_PATH.c_str(), "rb");
     if (!file) {
         log_e("Failed to open file!");
-        return nullptr;
+        return;
     }
-    UPSRam res = unique_psmalloc(MODEL_SIZE);
-    size_t bytes_read = file.read(res.get(), MODEL_SIZE);
+    size_t bytes_read = file.read(ptr, MODEL_SIZE);
     log_i("Read %d bytes into PSRAM\n", bytes_read);
 
     file.close();
@@ -86,18 +85,18 @@ UPSRam import_model() {
 constexpr size_t IMAGE_SIZE = (28*28); // number of pixels per image (grayscale)
 
 // Some tinyml specific consts
-constexpr size_t TENSOR_SIZE = 100 * 1024; // 1024 KB for tensors
+constexpr size_t TENSOR_SIZE = 300 * 1024; // 1024 KB for tensors
 
 // Make as global vars so we can access them from both setup() and loop() funcs
 tflite::MicroInterpreter* interpreter;
 tflite::MicroErrorReporter micro_error_reporter;
 
-UPSRam image_mem;
 typedef float ImageDataType;
 
 void setup_tinyml_model() {
     // Allocate mem for needs
-    UPSRam model_mem  = import_model();
+    UPSRam model_mem = unique_psmalloc(MODEL_SIZE);
+    import_model(model_mem.get());
     UPSRam tensor_mem = unique_psmalloc(TENSOR_SIZE);
 
     // Get the model version
@@ -144,14 +143,13 @@ void test_psram() {
 void setup() {
     Serial.begin(115200);
     setup_tinyml_model();
-    image_mem = unique_psmalloc(IMAGE_SIZE * sizeof(float));
 }
 
 void loop() {
     // Simple image load to a model
     ImageDataType* input = interpreter->input(0)->data.f;
     for (size_t i = 0; i < IMAGE_SIZE; i++) {
-        input[i] = image_mem.get()[i];
+        input[i] = input_data[i];
     }
 
     // Start the model
@@ -168,13 +166,13 @@ void loop() {
     float argmax = -1;
 
     for (size_t i = 0; i < 10; i++) {
-        Serial.printf("Class[%d] = %.2f %%\n", i, output[i]);
+        Serial.printf("Class[%d] = %.2f %%\n", i, output[i] * 100);
         if (output[i] > argmax) {
             argmax = output[i];
             label = i;
         }
     }
 
-    Serial.printf("The predicted number is: %d (%.2f %%)\n", label, argmax);
+    Serial.printf("The predicted number is: %d (%.2f %%)\n", label, argmax * 100);
     delay(5000);
 }
